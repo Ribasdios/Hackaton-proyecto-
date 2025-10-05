@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de Imagen con Zoom</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background-color: #0a0a0a;
+        }
+        #map {
+            width: 100%;
+            height: 100vh;
+            background: #1a1410;
+        }
+        .info-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(13, 17, 23, 0.95);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            max-width: 340px;
+            backdrop-filter: blur(10px);
+            border: 1px solid #30363d;
+        }
+        .info-panel h2 {
+            margin: 0 0 12px 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: #ff6b35;
+        }
+        .info-panel p {
+            margin: 8px 0;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #c9d1d9;
+        }
+        .info-panel .label {
+            color: #8b949e;
+            font-weight: 600;
+        }
+        .status {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            text-align: center;
+            font-weight: 600;
+            background: #238636;
+            color: white;
+        }
+        .file-input-container {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #30363d;
+        }
+        .file-input-container input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            margin-top: 8px;
+            border-radius: 6px;
+            border: 1px solid #30363d;
+            background: #0d1117;
+            color: white;
+            font-size: 12px;
+        }
+        .leaflet-control-zoom-in, 
+        .leaflet-control-zoom-out {
+            background-color: rgba(255, 255, 255, 0.95) !important;
+            border-radius: 8px !important;
+            border: none !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+        }
+        .leaflet-control-attribution {
+            background-color: rgba(13, 17, 23, 0.9) !important;
+            color: #8b949e !important;
+            border-radius: 8px !important;
+            padding: 5px 10px !important;
+        }
+    </style>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <!-- Panel de Información -->
+    <div class="info-panel">
+        <h2>🖼️ Visor de Imagen con Zoom</h2>
+        <p><span class="label">Estado:</span> <span id="imageStatus">Esperando imagen...</span></p>
+        <p><span class="label">Dimensiones:</span> <span id="imageDimensions">-</span></p>
+        
+        <div class="status" id="status">
+            Carga una imagen para comenzar
+        </div>
+
+        <div class="file-input-container">
+            <p style="margin: 8px 0 4px 0; font-size: 12px;"><span class="label">Seleccionar imagen:</span></p>
+            <input type="file" id="imageInput" accept="image/*" onchange="loadImage(event)">
+        </div>
+        
+        <p style="font-size: 11px; margin-top: 8px; color: #6e7681;">
+            <span class="label">Zoom:</span> <span id="zoomLevel">-</span>
+        </p>
+        
+        <p style="font-size: 11px; margin-top: 12px; color: #6e7681; line-height: 1.4;">
+            Usa los controles de zoom o la rueda del mouse para acercar/alejar la imagen. Haz clic y arrastra para moverte por la imagen.
+        </p>
+    </div>
+
+    <!-- Contenedor del Mapa -->
+    <div id="map"></div>
+
+    <script>
+        let map;
+        let imageOverlay;
+        let imageBounds;
+
+        // Inicializar mapa con CRS Simple (para imágenes sin coordenadas geográficas)
+        map = L.map('map', {
+            crs: L.CRS.Simple,
+            center: [0, 0],
+            zoom: 0,
+            minZoom: -2,
+            maxZoom: 4,
+            attributionControl: true
+        });
+
+        // Función para cargar imagen
+        function loadImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    // Actualizar información de la imagen
+                    document.getElementById('imageStatus').textContent = 'Imagen cargada';
+                    document.getElementById('imageDimensions').textContent = `${img.width} x ${img.height} px`;
+                    document.getElementById('status').textContent = 'Imagen cargada - Usa zoom para explorar';
+                    
+                    // Calcular límites de la imagen
+                    // En CRS.Simple, necesitamos mapear los píxeles de la imagen a coordenadas del mapa
+                    const aspectRatio = img.width / img.height;
+                    const height = 1000;
+                    const width = height * aspectRatio;
+                    
+                    imageBounds = [[0, 0], [height, width]];
+                    
+                    // Remover overlay anterior si existe
+                    if (imageOverlay) {
+                        map.removeLayer(imageOverlay);
+                    }
+                    
+                    // Crear nuevo overlay con la imagen
+                    imageOverlay = L.imageOverlay(e.target.result, imageBounds).addTo(map);
+                    
+                    // Ajustar vista al contenido de la imagen
+                    map.fitBounds(imageBounds);
+                    
+                    // Limitar el área de navegación a los límites de la imagen
+                    map.setMaxBounds(imageBounds);
+                    
+                    console.log('Imagen cargada exitosamente');
+                    console.log('Dimensiones:', img.width, 'x', img.height);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Actualizar información del zoom
+        function updateInfo() {
+            document.getElementById('zoomLevel').textContent = map.getZoom().toFixed(1);
+        }
+        
+        map.on('zoomend', updateInfo);
+        map.on('moveend', updateInfo);
+        updateInfo();
+
+        // Click para mostrar coordenadas de píxeles
+        map.on('click', function(e) {
+            if (!imageOverlay) return;
+            
+            const coords = e.latlng;
+            
+            L.popup()
+                .setLatLng(e.latlng)
+                .setContent(`
+                    <strong>Posición en la imagen</strong><br>
+                    Y: ${coords.lat.toFixed(2)}<br>
+                    X: ${coords.lng.toFixed(2)}<br>
+                    Zoom: ${map.getZoom().toFixed(1)}
+                `)
+                .openOn(map);
+        });
+
+        // Controles adicionales
+        L.control.scale({
+            imperial: false,
+            maxWidth: 200
+        }).addTo(map);
+
+        console.log('Visor de imagen inicializado');
+        console.log('Carga una imagen para comenzar a explorar');
+    </script>
+</body>
+</html>

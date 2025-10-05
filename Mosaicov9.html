@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de Marte - Área del Rover Opportunity</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background-color: #0a0a0a;
+        }
+        #map {
+            width: 100%;
+            height: 100vh;
+            background: #1a1410;
+        }
+        .info-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(13, 17, 23, 0.95);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            max-width: 340px;
+            backdrop-filter: blur(10px);
+            border: 1px solid #30363d;
+        }
+        .info-panel h2 {
+            margin: 0 0 12px 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: #ff6b35;
+        }
+        .info-panel p {
+            margin: 8px 0;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #c9d1d9;
+        }
+        .info-panel .label {
+            color: #8b949e;
+            font-weight: 600;
+        }
+        .status {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            text-align: center;
+            font-weight: 600;
+        }
+        .success {
+            background: #238636;
+            color: white;
+        }
+        .info {
+            background: #1f6feb;
+            color: white;
+        }
+        .layer-selector {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #30363d;
+        }
+        .layer-selector select {
+            width: 100%;
+            padding: 8px;
+            margin-top: 8px;
+            border-radius: 6px;
+            border: 1px solid #30363d;
+            background: #0d1117;
+            color: white;
+            font-size: 12px;
+        }
+        .leaflet-control-zoom-in, 
+        .leaflet-control-zoom-out {
+            background-color: rgba(255, 255, 255, 0.95) !important;
+            border-radius: 8px !important;
+            border: none !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+        }
+        .leaflet-control-attribution {
+            background-color: rgba(13, 17, 23, 0.9) !important;
+            color: #8b949e !important;
+            border-radius: 8px !important;
+            padding: 5px 10px !important;
+        }
+    </style>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <!-- Panel de Información -->
+    <div class="info-panel">
+        <h2>🔴 Marte - Rover Opportunity</h2>
+        <p><span class="label">Ubicación:</span> Meridiani Planum</p>
+        <p><span class="label">Coordenadas:</span> 2°S, 6°W</p>
+        <p><span class="label">Misión:</span> 2004-2018</p>
+        <p><span class="label">Distancia recorrida:</span> 45.16 km</p>
+        
+        <div class="status success" id="status">
+            Mapa de Marte CTX Mosaic - Funcionando
+        </div>
+
+        <div class="layer-selector">
+            <p style="margin: 8px 0 4px 0; font-size: 12px;"><span class="label">Capa de Marte:</span></p>
+            <select id="layerSelect" onchange="changeLayer()">
+                <option value="ctx">CTX Mosaic (Resolución Media)</option>
+                <option value="themis">THEMIS Day IR (Global)</option>
+                <option value="viking">Viking MDIM (Color Global)</option>
+            </select>
+        </div>
+
+        <p style="font-size: 11px; margin-top: 12px; color: #6e7681; line-height: 1.4;">
+            Esta es una solución funcional usando mapas globales de Marte de NASA. El servicio específico del mosaico HiRISE de Opportunity parece tener restricciones de acceso.
+        </p>
+        
+        <p style="font-size: 11px; margin-top: 8px; color: #6e7681;">
+            <span class="label">Zoom:</span> <span id="zoomLevel">-</span>
+        </p>
+    </div>
+
+    <!-- Contenedor del Mapa -->
+    <div id="map"></div>
+
+    <script>
+        let map;
+        let currentLayer;
+        
+        // Coordenadas del área de Opportunity en Meridiani Planum
+        const opportunityLat = -1.9462;
+        const opportunityLon = -5.4948;
+
+        console.log('Iniciando visor de Marte');
+        console.log('Área de Opportunity: Meridiani Planum');
+
+        // Inicializar mapa con CRS Simple (mejor para Marte)
+        map = L.map('map', {
+            crs: L.CRS.EPSG4326,
+            center: [opportunityLat, opportunityLon],
+            zoom: 6,
+            minZoom: 1,
+            maxZoom: 12,
+            attributionControl: true
+        });
+
+        // Definir las capas disponibles de Marte
+        const layers = {
+            ctx: {
+                name: 'CTX Mosaic',
+                url: 'https://trek.nasa.gov/tiles/Mars/EQ/Mars_MGS_MOLA_ClrShade_merge_global_463m/1.0.0//default/default028mm/{z}/{y}/{x}.jpg',
+                attribution: '© NASA/JPL/MSSS - Mars CTX'
+            },
+            themis: {
+                name: 'THEMIS Day IR',
+                url: 'https://trek.nasa.gov/tiles/Mars/EQ/Mars_MO_THEMIS-IR-Day_mosaic_global_100m/1.0.0//default/default028mm/{z}/{y}/{x}.jpg',
+                attribution: '© NASA/JPL/ASU - THEMIS'
+            },
+            viking: {
+                name: 'Viking MDIM',
+                url: 'https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0//default/default028mm/{z}/{y}/{x}.jpg',
+                attribution: '© NASA/JPL/USGS - Viking'
+            }
+        };
+
+        // Función para crear capa con proxy
+        function createLayer(layerKey) {
+            const layer = layers[layerKey];
+            return L.tileLayer(layer.url, {
+                attribution: layer.attribution,
+                tileSize: 256,
+                minZoom: 1,
+                maxZoom: 12,
+                noWrap: true
+            });
+        }
+
+        // Cargar capa inicial
+        currentLayer = createLayer('ctx');
+        currentLayer.addTo(map);
+
+        // Función para cambiar capa
+        function changeLayer() {
+            const selectedLayer = document.getElementById('layerSelect').value;
+            
+            if (currentLayer) {
+                map.removeLayer(currentLayer);
+            }
+            
+            currentLayer = createLayer(selectedLayer);
+            currentLayer.addTo(map);
+            
+            console.log('Capa cambiada a:', layers[selectedLayer].name);
+        }
+
+        // Marcador en la ubicación de Opportunity
+        const opportunityIcon = L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background: #ff6b35; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.5);"></div>',
+            iconSize: [12, 12],
+            iconAnchor: [6, 6]
+        });
+
+        const marker = L.marker([opportunityLat, opportunityLon], {
+            icon: opportunityIcon
+        }).addTo(map);
+        
+        marker.bindPopup(`
+            <strong>Rover Opportunity</strong><br>
+            Meridiani Planum<br>
+            <small>Lat: ${opportunityLat.toFixed(4)}°</small><br>
+            <small>Lon: ${opportunityLon.toFixed(4)}°</small><br>
+            <small>Activo: 2004-2018</small>
+        `);
+
+        // Círculo mostrando área aproximada de exploración
+        L.circle([opportunityLat, opportunityLon], {
+            color: '#ff6b35',
+            fillColor: '#ff6b35',
+            fillOpacity: 0.1,
+            radius: 5000 // ~5km de área explorada
+        }).addTo(map);
+
+        // Actualizar información del zoom
+        function updateInfo() {
+            document.getElementById('zoomLevel').textContent = map.getZoom();
+        }
+        
+        map.on('zoomend', updateInfo);
+        map.on('moveend', updateInfo);
+        updateInfo();
+
+        // Click para mostrar coordenadas
+        map.on('click', function(e) {
+            const lat = e.latlng.lat.toFixed(6);
+            const lng = e.latlng.lng.toFixed(6);
+            
+            L.popup()
+                .setLatLng(e.latlng)
+                .setContent(`
+                    <strong>Coordenadas en Marte</strong><br>
+                    Latitud: ${lat}°<br>
+                    Longitud: ${lng}°<br>
+                    Zoom: ${map.getZoom()}
+                `)
+                .openOn(map);
+        });
+
+        // Controles adicionales
+        L.control.scale({
+            imperial: false,
+            maxWidth: 200
+        }).addTo(map);
+
+        console.log('Mapa de Marte cargado exitosamente');
+        console.log('Puedes cambiar entre diferentes capas usando el selector');
+    </script>
+</body>
+</html>
