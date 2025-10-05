@@ -1,0 +1,156 @@
+import requests
+import math
+from PIL import Image
+import io
+from datetime import datetime, timedelta
+
+
+def lat_lon_to_tile_gibs(lat, lon, zoom):
+    """Convierte lat/lon a coordenadas de tile para GIBS EPSG:4326"""
+    # GIBS usa un sistema de tiles diferente (EPSG:4326)
+    tiles_per_row = 2 ** (zoom + 1)
+    tiles_per_col = 2 ** zoom
+
+    # Normalizar coordenadas
+    x = (lon + 180.0) / 360.0 * tiles_per_row
+    y = (90.0 - lat) / 180.0 * tiles_per_col
+
+    return (int(x), int(y))
+
+
+def download_nasa_gibs_map(lat, lon, api_key, zoom=5, tile_size=3, date=None):
+    """
+    Descarga tiles del NASA GIBS (Global Imagery Browse Services)
+
+    Args:
+        lat: Latitud central
+        lon: Longitud central
+        api_key: Tu NASA API key
+        zoom: Nivel de zoom (0-8 para GIBS)
+        tile_size: Número de tiles (debe ser impar, ej: 3 para 3x3)
+        date: Fecha en formato 'YYYY-MM-DD' (None = ayer)
+    """
+
+    # Si no se especifica fecha, usar ayer (datos más recientes disponibles)
+    if date is None:
+        date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    print(f"Usando fecha: {date}")
+
+    # Convertir coordenadas
+    center_x, center_y = lat_lon_to_tile_gibs(lat, lon, zoom)
+    print(f"Tile central: ({center_x}, {center_y}) en zoom {zoom}")
+
+    # URL base de NASA GIBS WMTS
+    # Capas disponibles:
+    # - MODIS_Terra_CorrectedReflectance_TrueColor (color real)
+    # - VIIRS_SNPP_CorrectedReflectance_TrueColor (alta resolución)
+    # - BlueMarble_NextGeneration (mapa base)
+
+    base_url = "https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/{date}/250m/{zoom}/{y}/{x}.jpg"
+
+    tiles = []
+    half_size = tile_size // 2
+    valid_tiles = 0
+
+    print(f"\nDescargando mapa de {tile_size}x{tile_size} tiles...")
+
+    for dy in range(-half_size, half_size + 1):
+        row_tiles = []
+        for dx in range(-half_size, half_size + 1):
+            x = center_x + dx
+            y = center_y + dy
+
+            # Verificar que las coordenadas estén en rango válido
+            max_tiles_x = 2 ** (zoom + 1)
+            max_tiles_y = 2 ** zoom
+
+            if x < 0 or x >= max_tiles_x or y < 0 or y >= max_tiles_y:
+                print(f"  Tile ({x}, {y}) fuera de rango. Usando placeholder.")
+                row_tiles.append(Image.new('RGB', (512, 512), (0, 0, 0)))
+                continue
+
+            url = base_url.format(date=date, zoom=zoom, x=x, y=y)
+
+            print(f"  Descargando tile ({x}, {y})...", end=" ")
+
+            try:
+                # NASA API key se puede pasar como parámetro
+                params = {'api_key': api_key}
+                response = requests.get(url, params=params, timeout=15)
+
+                if response.status_code == 200:
+                    img = Image.open(io.BytesIO(response.content))
+                    row_tiles.append(img)
+                    valid_tiles += 1
+                    print("✓")
+                else:
+                    print(f"✗ (Status {response.status_code})")
+                    # Tile vacío como placeholder
+                    row_tiles.append(Image.new('RGB', (512, 512), (50, 50, 50)))
+
+            except Exception as e:
+                print(f"✗ Error: {e}")
+                row_tiles.append(Image.new('RGB', (512, 512), (50, 50, 50)))
+
+        if row_tiles:
+            tiles.append(row_tiles)
+
+    print(f"\nTiles válidos descargados: {valid_tiles}/{tile_size * tile_size}")
+
+    if valid_tiles == 0:
+        raise Exception("No se pudo descargar ningún tile válido")
+
+    # Combinar tiles
+    print("Combinando tiles en imagen final...")
+    tile_width = 512  # GIBS usa tiles de 512x512
+    tile_height = 512
+
+    map_width = len(tiles[0]) * tile_width
+    map_height = len(tiles) * tile_height
+
+    final_map = Image.new('RGB', (map_width, map_height))
+
+    for i, row in enumerate(tiles):
+        for j, tile in enumerate(row):
+            final_map.paste(tile, (j * tile_width, i * tile_height))
+
+    return final_map
+
+
+# Ejemplo de uso
+if __name__ == "__main__":
+    # ¡IMPORTANTE! Reemplaza con tu API key real
+    NASA_API_KEY = "mGA434HAoPeumrNudbkNwszxQdKRBt65xosGPfhc"
+
+    # Coordenadas de Monterrey, México
+    latitude = 25.6866
+    longitude = -100.3161
+
+    try:
+        # Nota: zoom para GIBS va de 0-8 (0=mundo, 8=muy detallado)
+        # zoom=5 es bueno para regiones/ciudades
+        mapa = download_nasa_gibs_map(
+            lat=latitude,
+            lon=longitude,
+            api_key=NASA_API_KEY,
+            zoom=5,
+            tile_size=3,
+            date='2024-10-01'  # Puedes cambiar la fecha o usar None para ayer
+        )
+
+        # Guardar imagen
+        output_file = "nasa_map.png"
+        mapa.save(output_file)
+        print(f"\n✓ Mapa guardado exitosamente como '{output_file}'")
+        print(f"  Tamaño: {mapa.width}x{mapa.height} pixels")
+
+        # También guardar en alta calidad
+        mapa.save("nasa_map.jpg", quality=95, optimize=True)
+        print(f"  También guardado como 'nasa_map.jpg'")
+
+    except Exception as e:
+        print(f"\n✗ Error: {e}")
+        import traceback
+
+        traceback.print_exc()
